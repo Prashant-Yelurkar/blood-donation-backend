@@ -1,5 +1,5 @@
 import { verifyToken } from "../utils/jwt.js";
-import AuthUser from "../models/authuser.model.js";
+import AuthUser from "../models/authUser.model.js";
 
 export const protect = async (req, res, next) => {
   try {

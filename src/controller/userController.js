@@ -1,6 +1,6 @@
 import { users } from "../seeds/userSeeds.js";
 import Role from "../models/role.model.js";
-import AuthUser from "../models/authuser.model.js";
+import AuthUser from "../models/authUser.model.js";
 import { hashPassword } from "../utils/hash.js";
 
 

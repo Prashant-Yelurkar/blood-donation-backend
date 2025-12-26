@@ -1,4 +1,4 @@
-import AuthUser from "../models/authuser.model.js";
+import AuthUser from "../models/authUser.model.js";
 import Call from "../models/call.model.js";
 import Event from "../models/event.model.js";
 import EventAttendee from "../models/eventAttended.model.js"; // attendees info
