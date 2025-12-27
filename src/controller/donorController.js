@@ -109,7 +109,7 @@ const addDonor = async (req, res) => {
 
     // ----------------- BASIC VALIDATION -----------------
     const hasContact = email || contact;
-    const hasRequiredFields = name  && gender && bloodGroup;
+    const hasRequiredFields = name  && gender ;
 
     if (!hasContact || !hasRequiredFields) {
       return res.status(400).json({
@@ -195,7 +195,7 @@ const addDonor = async (req, res) => {
           name,
           dob,
           gender: gender.toUpperCase(),
-          bloodGroup,
+          // bloodGroup,
           weight,
           address,
           lastDonationDate,

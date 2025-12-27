@@ -1,8 +1,10 @@
+import connectDB from "../config/db.js";
 import Role from "../models/role.model.js";
 import { roles } from "../seeds/roleSeeds.js";
 
 export const seedRoles = async (req, res) => {
   try {
+    await connectDB()
     for (const role of roles) {
       const exists = await Role.findOne({ name: role.name });
       if (!exists) {
@@ -22,6 +24,7 @@ export const seedRoles = async (req, res) => {
 
 
 export const getAllRoles = async (req, res) => {
+    await connectDB();
   try {
     const roles = await Role.find();
     res.status(200).json(roles);

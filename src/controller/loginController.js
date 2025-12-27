@@ -5,7 +5,7 @@ import { generateToken } from "../utils/jwt.js";
 import connectDB from "../config/db.js";
 const login = async (req, res) => {
     try {
-             await connectDB();
+        await connectDB();
         const { identifier, password } = req.body;
         if (!identifier || !password) {
             return res

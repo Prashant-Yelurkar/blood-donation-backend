@@ -4,6 +4,7 @@ import { hashPassword } from "../utils/hash.js";
 import mongoose from "mongoose";
 import UserProfile from "../models/userProfile.model.js";
 
+
 const getAllVolunteers = async (req, res) => {
     try {
         const role = await Role.findOne({ name: "VOLUNTEER" });
