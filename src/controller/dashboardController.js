@@ -1,3 +1,4 @@
+import connectDB from "../config/db.js";
 import User from "../models/authUser.model.js";
 import Call from "../models/call.model.js";
 import Event from "../models/event.model.js";
@@ -5,6 +6,7 @@ import EventAttendee from "../models/eventAttended.model.js";
 
 const getMainDashboardSummary = async (req, res) => {
   try {
+    await connectDB()
     const [
       totalEvents,
       activeEvents,

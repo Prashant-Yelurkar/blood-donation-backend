@@ -5,6 +5,8 @@ import { generateToken } from "../utils/jwt.js";
 import connectDB from "../config/db.js";
 const login = async (req, res) => {
     try {
+        console.log("here");
+        
         await connectDB();
         const { identifier, password } = req.body;
         if (!identifier || !password) {

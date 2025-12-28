@@ -3,7 +3,7 @@ import AuthUser from "../models/authUser.model.js";
 import connectDB from "../config/db.js";
 export const protect = async (req, res, next) => {
   try {
- await connectDB();
+    await connectDB();
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {

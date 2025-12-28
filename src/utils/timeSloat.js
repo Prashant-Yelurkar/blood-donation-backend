@@ -1,12 +1,10 @@
-// Helper: Convert 24-hour to 12-hour format
-const format12Hour = (hour) => {
-  const period = hour >= 12 ? "PM" : "AM";
-  const h = hour % 12 === 0 ? 12 : hour % 12;
-  return `${h} ${period}`;
+// Helper: format hour to 24-hour HH:00
+const format24Hour = (hour) => {
+  return `${String(hour).padStart(2, "0")}:00`;
 };
 
-// Time slots (24-hour logic)
 export const TIME_SLOTS = [
+  { start: 8, end: 9 },
   { start: 9, end: 10 },
   { start: 10, end: 11 },
   { start: 11, end: 12 },
@@ -15,12 +13,15 @@ export const TIME_SLOTS = [
   { start: 14, end: 15 },
   { start: 15, end: 16 },
   { start: 16, end: 17 },
+  { start: 17, end: 18 },
+  { start: 18, end: 19 },
+  { start: 19, end: 20 },
 ].map(slot => ({
   ...slot,
-  label: `${format12Hour(slot.start)} - ${format12Hour(slot.end)}`
+  label: `${format24Hour(slot.start)} - ${format24Hour(slot.end)}`
 }));
 
-// Auto-select time slot based on current time
+// Auto-select time slot based on current time (24-hour logic)
 export const getAutoTimeSlot = () => {
   const now = new Date();
   const hour = now.getHours();

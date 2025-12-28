@@ -29,7 +29,6 @@ const userProfileSchema = new mongoose.Schema(
     bloodGroup: {
       type: String,
       enum: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
-      // required:true,
     },
 
     weight: {
@@ -44,11 +43,13 @@ const userProfileSchema = new mongoose.Schema(
     address: {
       type: String,
     },
-
+    workAddress:{
+      type:String,
+    },
     referral: {
       type: {
         type: String,
-        enum: ["USER", "DOOR_TO_DOOR", "DESK", "DIRECT"],
+        enum: ["USER", "DOOR_TO_DOOR", "DESK", "DIRECT" ,"CAMP_2024"],
         default: "DIRECT",
       },
 

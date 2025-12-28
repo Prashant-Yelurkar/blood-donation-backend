@@ -15,7 +15,7 @@ const EventAttendeeSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["PENDING", "DONATED", "REJECTED"],
+      enum: ["PENDING", "DONATED", "REJECTED","CANCLED"],
       default: "PENDING",
     },
 

@@ -1,5 +1,6 @@
-export const users = [
+export const users1 = [
     {
+          name:"admin",
         email: "admin@gmail.com",
         contact:"1234567890",
         password: "admin@123",
@@ -25,7 +26,7 @@ export const users = [
     // }
 ]
 
-export const users1=[
+export const users=[
         {
     "name":"admin",
     "email":"admin@gmail.com",

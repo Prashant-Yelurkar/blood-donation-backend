@@ -4,7 +4,9 @@ import Event from "../models/event.model.js";
 import EventAttendee from "../models/eventAttended.model.js"; // attendees info
 import mongoose from "mongoose";
 import { getAutoTimeSlot } from "../utils/timeSloat.js";
-
+import { parseCSV, parseExcel } from "../utils/parseFile.js";
+import connectDB from "../config/db.js";
+import ExcelJS from 'exceljs';
 
 const getAllEvent = async (req, res) => {
   try {
@@ -160,14 +162,14 @@ const getEventDetailsById = async (req, res) => {
           bloodGroupDistribution[bg] =
             (bloodGroupDistribution[bg] || 0) + 1;
         }
-      } 
+      }
       else if (attendee.status === "REJECTED") {
         totalRejected++;
         if (attendee.rejectedReason) {
           rejectionReasons[attendee.rejectedReason] =
             (rejectionReasons[attendee.rejectedReason] || 0) + 1;
         }
-      } 
+      }
       else {
         totalRegisteredNotCome++;
       }
@@ -250,8 +252,8 @@ const getRegisteredUsersByEvent = async (req, res) => {
           totalCallMade,
           lastCallFeedback: lastCall?.description || "",
           lastCallTime: lastCall?.callTime || null,
-          timeSloat:a.checkInTime,
-          callStatus:lastCall?.status,
+          timeSloat: a.checkInTime,
+          callStatus: lastCall?.status,
         };
       })
     );
@@ -564,7 +566,7 @@ const updateEventAttendeeStatus = async (req, res) => {
     }
 
     // 🔹 Handle DONATED / REJECTED
-    const allowedStatus = ["PENDING", "DONATED", "REJECTED"];
+    const allowedStatus = ["PENDING", "DONATED", "REJECTED", "CANCELLED"];
     if (!allowedStatus.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -625,10 +627,239 @@ const updateEventAttendeeStatus = async (req, res) => {
 
 
 
+const registerUsersToEventFromFile = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    /* 1️⃣ Validate Event ID */
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid event ID",
+      });
+    }
+
+    /* 2️⃣ Check Event */
+    const event = await Event.findById(id);
+    if (!event || !event.isActive) {
+      return res.status(404).json({
+        success: false,
+        message: "Event not found or inactive",
+      });
+    }
+
+    /* 3️⃣ Validate File */
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No file uploaded",
+      });
+    }
+
+    /* 4️⃣ Parse File */
+    let records = [];
+    if (req.file.mimetype === "text/csv") {
+      records = await parseCSV(req.file.buffer);
+    } else {
+      records = parseExcel(req.file.buffer);
+    }
+
+    if (!records.length) {
+      return res.status(400).json({
+        success: false,
+        message: "File is empty",
+      });
+    }
+
+    /* 5️⃣ Result Trackers */
+    const inserted = [];
+    const skipped = [];
+    const errors = [];
+
+    /* 6️⃣ LOOP EACH ROW */
+    for (let i = 0; i < records.length; i++) {
+      const row = records[i];
+
+      try {
+        const email = row.email?.trim().toLowerCase();
+        const contact = row.contact ? String(row.contact).trim() : null;
+        let time = row.timeSloat;
+        if (!email && !contact) {
+          errors.push(`Row ${i + 1}: Email or Contact required`);
+          continue;
+        }
+
+        const conditions = [];
+        if (email) conditions.push({ email });
+        if (contact) conditions.push({ contact });
+
+        const user = await AuthUser.findOne({ $or: conditions });
+
+        if (!user) {
+          errors.push(`Row ${i + 1}: User not found`);
+          continue;
+        }
+
+        const exists = await EventAttendee.findOne({
+          event: id,
+          user: user._id,
+        });
+
+        if (exists) {
+          skipped.push(i + 1);
+          continue;
+        }
+
+        let finalTimeSlot = time;
+        if (!time || typeof time !== "string" || time.trim() === "") {
+          finalTimeSlot = getAutoTimeSlot();
+        }
+
+        /* REGISTER */
+        await EventAttendee.create({
+          event: id,
+          user: user._id,
+          status: "PENDING",
+          checkInTime: finalTimeSlot,
+        });
+
+        inserted.push(i + 1);
+      } catch (err) {
+        console.error(`Row ${i + 1} error`, err);
+        errors.push(`Row ${i + 1}: ${err.message}`);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Bulk registration completed",
+      totalRows: records.length,
+      inserted: inserted.length,
+      skipped: skipped.length,
+      errors,
+    });
+  } catch (error) {
+    console.error("Bulk Register Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
 
 
 
 
 
+const getEventReport = async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    await connectDB();
+    if (!mongoose.Types.ObjectId.isValid(eventId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid event ID",
+      });
+    }
 
-export { getAllEvent, getEventDetailsById, addEvent, deleteEvent, getRegisteredUsersByEvent, getUnregisteredUsersByEvent, registerUserToEvent, updateEventAttendeeStatus };
+    /* 🔹 Fetch attendees with user & profile */
+    const attendees = await EventAttendee.find({ event: eventId })
+      .populate({
+        path: "user",
+        select: "email contact",
+        populate: {
+          path: "profile",
+          model: "UserProfile",
+          populate: [
+            {
+              // populate referred user's profile
+              path: "referral.referredUser",
+              model: "UserProfile",
+              populate: {
+                // populate referred user's auth user to get contact
+                path: "authUser",
+                model: "AuthUser",
+                select: "contact email",
+              },
+            },
+          ],
+        },
+      });
+
+    if (!attendees.length) {
+      return res.status(404).json({
+        success: false,
+        message: "No donor data found",
+      });
+    }
+
+
+    /* 🔹 Create Excel */
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Donor Report");
+
+    sheet.columns = [
+      { header: "Donor Name", key: "name", width: 22 },
+      { header: "Contact", key: "contact", width: 16 },
+      { header: "Blood Group", key: "bloodGroup", width: 14 },
+      { header: "Address", key: "address", width: 30 },
+      { header: "Work Address", key: "workAddress", width: 30 },
+      { header: "Donation Status", key: "status", width: 16 },
+      { header: "Rejection Reason", key: "rejectionReason", width: 24 },
+      { header: "Referred By", key: "referredBy", width: 22 },
+      { header: "Referrer Contact", key: "referrerContact", width: 18 },
+    ];
+
+    /* 🔹 Fill Rows */
+    attendees.forEach((row) => {
+      const profile = row.user.profile || {};
+      const ref = profile.referral || {};
+
+
+      sheet.addRow({
+        name: profile?.name || "-",
+        contact: row.user?.contact || row.user?.email || "-",
+        bloodGroup: profile?.bloodGroup || "-",
+        address: profile?.address || "-",
+        workAddress: profile?.workAddess || "-",
+        status: row.status || "PENDING",
+        rejectionReason:
+          row.status === "REJECTED" ? row.rejectedReason || "-" : "-",
+
+        // 👇 KEY FIX HERE
+        referredBy: ref?.referredUser?.name
+          ? ref.referredUser.name
+          : ref?.type || "-",
+
+        referrerContact: ref?.referredUser?.authUser?.contact || "-",
+      });
+
+    });
+
+    /* 🔹 Styling */
+    sheet.getRow(1).font = { bold: true };
+
+    /* 🔹 Response Headers */
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=donor-report-${Date.now()}.xlsx`
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Excel Export Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to export donor report",
+    });
+  }
+};
+
+
+
+export { getEventReport, registerUsersToEventFromFile, getAllEvent, getEventDetailsById, addEvent, deleteEvent, getRegisteredUsersByEvent, getUnregisteredUsersByEvent, registerUserToEvent, updateEventAttendeeStatus };
