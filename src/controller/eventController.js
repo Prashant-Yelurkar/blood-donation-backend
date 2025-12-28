@@ -205,19 +205,43 @@ const getEventDetailsById = async (req, res) => {
 
 
 const getRegisteredUsersByEvent = async (req, res) => {
+  await connectDB();
   try {
     const { id } = req.params;
-
-    const attendees = await EventAttendee.find({ event: id })
+    
+    // const attendees = await EventAttendee.find({ event: id })
+    //   .populate({
+    //     path: "user",
+    //     select: "email contact profile",
+    //     populate: {
+    //       path: "profile",
+    //       select: "name bloodGroup",
+    //     },
+    //   })
+    //   .lean();
+const attendees = await EventAttendee.find({ event: id })
       .populate({
         path: "user",
-        select: "email contact profile",
+        select: "email contact",
         populate: {
           path: "profile",
-          select: "name bloodGroup",
+          model: "UserProfile",
+          populate: [
+            {
+              // populate referred user's profile
+              path: "referral.referredUser",
+              model: "UserProfile",
+              populate: {
+                // populate referred user's auth user to get contact
+                path: "authUser",
+                model: "AuthUser",
+                select: "contact email",
+              },
+            },
+          ],
         },
-      })
-      .lean();
+      });
+
 
     const results = await Promise.all(
       attendees.map(async (a) => {
@@ -235,6 +259,9 @@ const getRegisteredUsersByEvent = async (req, res) => {
           user: a.user._id,
         });
 
+console.log(a.user.profile?.referral);
+
+        
         return {
           id: a.user._id,
 
@@ -248,7 +275,8 @@ const getRegisteredUsersByEvent = async (req, res) => {
 
           status: a.status,
           rejectedReason: a.rejectedReason,
-
+          referredBy:a.user.profile?.referral?.referredUser ? a.user.profile.referral?.referredUser?.name: a.user.profile.referral?.type,
+          asas:"asas",
           totalCallMade,
           lastCallFeedback: lastCall?.description || "",
           lastCallTime: lastCall?.callTime || null,

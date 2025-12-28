@@ -6,7 +6,9 @@ import EventAttendee from "../models/eventAttended.model.js";
 
 const getMainDashboardSummary = async (req, res) => {
   try {
-    await connectDB()
+    await connectDB();
+    console.log("here");
+    
     const [
       totalEvents,
       activeEvents,
@@ -75,9 +77,7 @@ const getMainDashboardSummary = async (req, res) => {
       },
     ]);
 
-    /* ======================
-       REJECTION REASONS
-    ======================= */
+
     const rejectionReasons = await EventAttendee.aggregate([
       { $match: { status: "REJECTED", rejectedReason: { $ne: "" } } },
       {
@@ -88,9 +88,7 @@ const getMainDashboardSummary = async (req, res) => {
       },
     ]);
 
-    /* ======================
-       RECENT EVENTS (OPTIONAL)
-    ======================= */
+
     const recentEvents = await Event.find()
       .sort({ createdAt: -1 })
       .limit(5)

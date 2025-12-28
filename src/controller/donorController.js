@@ -176,6 +176,7 @@ const addDonor = async (req, res) => {
       if (address) userProfileData.address = address;
       if (workAddress) userProfileData.workAddress = workAddress;
       if (lastDonationDate) userProfileData.lastDonationDate = lastDonationDate;
+      if(referredBy) userProfileData.referral=referralData;
 
       await UserProfile.create(userProfileData);
     } catch (err) {
