@@ -4,48 +4,133 @@ import { hashPassword } from "../utils/hash.js";
 import mongoose from "mongoose";
 import UserProfile from "../models/userProfile.model.js";
 import { parseCSV, parseExcel } from "../utils/parseFile.js";
+import Area from "../models/area.model.js";
+
+
 
 
 const getAllDonor = async (req, res) => {
   try {
+    const filters = req.query;
+   
+    
+    // 1️⃣ Get volunteer role
     const role = await Role.findOne({ name: "USER" });
     if (!role) {
       return res.status(404).json({
-        message: "Volunteer role not found",
         success: false,
+        message: "User role not found",
       });
     }
 
-    const donors = await AuthUser.find({
+    // 2️⃣ Base Mongo query
+    const query = {
       role: role._id,
-      isActive: true,
-    })
-      .select("email contact")
+    };
+
+    // 3️⃣ DB-level filters
+    if (filters.area && mongoose.Types.ObjectId.isValid(filters.area)) {
+      query.area = new mongoose.Types.ObjectId(filters.area);
+    }
+
+    if (filters.isActive !== undefined) {
+      query.isActive = filters.isActive === "true";
+    }
+
+    if (filters.email) {
+      query.email = { $regex: filters.email, $options: "i" };
+    }
+
+    if (filters.contact) {
+      query.contact = { $regex: filters.contact, $options: "i" };
+    }
+     console.log(filters);
+
+    // 4️⃣ Fetch volunteers
+    let donor = await AuthUser.find(query)
+      .select("email contact isActive area")
       .populate({
         path: "profile",
-        select: "name dob age",
-      });
+        select: "name -authUser",
+      })
+      .populate({
+        path: "area",
+        select: "name pincode",
+      })
+      .lean({ virtuals: true });
 
-    if (!donors.length) {
-      return res.status(404).json({
-        message: "No donors found",
-        success: false,
-      });
+    // 5️⃣ JS-level filters (virtual / populated)
+    if (filters.name) {
+      const keyword = filters.name.toLowerCase();
+      donor = user.filter(
+        (v) => v?.profile?.name?.toLowerCase().includes(keyword)
+      );
+    }
+
+    if (filters.pincode) {
+      donor = donor.filter(
+        (v) => v?.area?.pincode?.includes(filters.pincode)
+      );
     }
 
     res.status(200).json({
-      message: "Get all donor",
       success: true,
-      donors,
+      total: donor.length,
+      donors:donor,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Get Volunteers Error:", error);
     res.status(500).json({
-      message: "Server error",
       success: false,
+      message: "Server error",
     });
   }
 };
+
+
+
+// const getAllDonor = async (req, res) => {
+//   try {
+//     const role = await Role.findOne({ name: "USER" });
+//     if (!role) {
+//       return res.status(404).json({
+//         message: "Volunteer role not found",
+//         success: false,
+//       });
+//     }
+
+//     const donors = await AuthUser.find({
+//       role: role._id,
+//     })
+//       .select("email contact isActive")
+//       .populate({
+//         path: "profile",
+//         select: "name dob age",
+//       }).populate({
+//         path:"area",
+//         select:"name pincode",
+//       });
+
+//     if (!donors.length) {
+//       return res.status(404).json({
+//         message: "No donors found",
+//         success: false,
+//       });
+//     }
+
+//     res.status(200).json({
+//       message: "Get all donor",
+//       success: true,
+//       donors,
+//     });
+//   } catch (error) {
+//     console.error(error);
+//     res.status(500).json({
+//       message: "Server error",
+//       success: false,
+//     });
+//   }
+// };
 
 
 const getDonorById = async (req, res) => {
@@ -58,28 +143,48 @@ const getDonorById = async (req, res) => {
       });
     }
 
-    const donor = await AuthUser.findOne({
+    const donorDoc = await AuthUser.findOne({
       role: role._id,
       _id: new mongoose.Types.ObjectId(req.params.id),
     })
-      .select("email contact")
+      .select("email contact area isActive")
       .populate({
         path: "profile",
-        select: "name dob age gender bloodGroup weight lastDonationDate address workAddress",
+        select:
+          "name dob age gender bloodGroup weight lastDonationDate address workAddress referral",
+      })
+      .populate({
+        path: "area",
+        select: "name pincode",
       });
 
-    if (!donor) {
-      return res.status(404).json({
-        message: "Donor not found",
-        success: false,
-      });
+    if (!donorDoc) {
+      return res.status(404).json({ success: false, message: "Donor not found" });
     }
 
-    res.status(200).json({
-      message: "Donor fetched successfully",
+    // convert to plain object ✅
+    const donor = donorDoc.toObject();
+
+    if (
+      donor?.profile?.referral?.type === "USER" &&
+      donor?.profile?.referral?.referredUser
+    ) {
+      const refProfile = await UserProfile.findOne({
+        authUser: donor.profile.referral.referredUser,
+      }).select("name");
+      
+      donor.profile.referral = {
+        ...donor.profile.referral,
+        name: refProfile?.name || null,
+      };
+    }
+
+    return res.status(200).json({
       success: true,
       donor,
     });
+
+
   } catch (error) {
     console.error(error);
     res.status(500).json({
@@ -104,7 +209,9 @@ const addDonor = async (req, res) => {
       workAddress,       // 👈 new field
       lastDonationDate,
       referredBy,        // 👈 optional
+      area,
     } = req.body;
+
 
     // ----------------- BASIC VALIDATION -----------------
     if (!(email || contact) || !(name && gender)) {
@@ -138,13 +245,21 @@ const addDonor = async (req, res) => {
       });
     }
 
-  
+
+    const validArea = await Area.findById(area);
+    if (!validArea) {
+      return res.status(404).json({
+        success: false,
+        message: "Donor Area not found",
+      });
+    }
     const authUserData = {
       password: await hashPassword(
         name.split(" ")[0].toLowerCase() + "@123"
       ),
       role: role._id,
       isActive: true,
+      area: validArea._id
     };
 
     if (email?.trim()) authUserData.email = email.trim();
@@ -156,7 +271,7 @@ const addDonor = async (req, res) => {
     let signupSource = "DIRECT";
 
     if (referredBy && mongoose.Types.ObjectId.isValid(referredBy)) {
-      const referredProfile = await UserProfile.findOne({ authUser: referredBy });
+      const referredProfile = await AuthUser.findById( referredBy );
 
       if (referredProfile) {
         referralData = { type: "USER", referredUser: referredProfile._id };
@@ -176,7 +291,7 @@ const addDonor = async (req, res) => {
       if (address) userProfileData.address = address;
       if (workAddress) userProfileData.workAddress = workAddress;
       if (lastDonationDate) userProfileData.lastDonationDate = lastDonationDate;
-      if(referredBy) userProfileData.referral=referralData;
+      if (referredBy) userProfileData.referral = referralData;
 
       await UserProfile.create(userProfileData);
     } catch (err) {
@@ -218,6 +333,9 @@ const updateDonor = async (req, res) => {
       address,
       workAddress,
       lastDonationDate,
+      referral,
+      area,
+      isActive,
     } = req.body;
 
     // Check role
@@ -253,6 +371,14 @@ const updateDonor = async (req, res) => {
     const authUpdate = {};
     if (email) authUpdate.email = email.trim();
     if (contact) authUpdate.contact = contact.trim();
+ 
+    if (area) {
+      authUpdate.area = area;
+    }
+    if (isActive !== undefined) {
+      isActive  === true || isActive === "true";
+      authUpdate.isActive = isActive;
+    }
 
     if (Object.keys(authUpdate).length) {
       await AuthUser.updateOne({ _id: id }, { $set: authUpdate });
@@ -268,15 +394,16 @@ const updateDonor = async (req, res) => {
     if (address) profileUpdate.address = address;
     if (workAddress) profileUpdate.workAddress = workAddress;
     if (lastDonationDate) profileUpdate.lastDonationDate = lastDonationDate;
+    if(referral) profileUpdate.referral = referral;
 
-    console.log(profileUpdate);
-    
+
+
     if (Object.keys(profileUpdate).length) {
       await UserProfile.updateOne({ authUser: id }, { $set: profileUpdate });
     }
 
-  
-    
+
+
     res.status(200).json({
       success: true,
       message: "Donor updated successfully",
@@ -293,6 +420,8 @@ const deleteDonor = async (req, res) => {
   try {
     const { id } = req.params;
 
+    console.log(id);
+    
     const role = await Role.findOne({ name: "USER" });
     if (!role) {
       return res.status(404).json({
@@ -305,7 +434,6 @@ const deleteDonor = async (req, res) => {
       {
         _id: id,
         role: role._id,
-        isActive: true,
       },
       {
         $set: { isActive: false },
@@ -365,7 +493,7 @@ const seedDonor = async (req, res) => {
       const row = records[i];
 
       // 🔴 Required validation
-      if (!row.name || !row.gender || (!row.email && !row.contact)) {
+      if (!row.name || !row.gender || !row.area|| (!row.email && !row.contact)) {
         errors.push(`Row ${i + 1}: Missing required fields`);
         continue;
       }
@@ -396,6 +524,14 @@ const seedDonor = async (req, res) => {
 
       if (email) authUserPayload.email = email;
       if (contact) authUserPayload.contact = contact;
+      const area = await Area.findOne({name:row.area});
+      
+      if (!area)
+      {
+        skipped.push(i + 1);
+        continue;
+      }
+      if(area) authUserPayload.area = area._id;
 
       const authUser = await AuthUser.create(authUserPayload);
 
@@ -448,7 +584,7 @@ const seedDonor = async (req, res) => {
       if (row.bloodGroup) profilePayload.bloodGroup = row.bloodGroup;
       if (row.weight) profilePayload.weight = Number(row.weight);
       if (row.lastDonationDate)
-       profilePayload.lastDonationDate = parseExcelDate(row.lastDonationDate);
+        profilePayload.lastDonationDate = parseExcelDate(row.lastDonationDate);
       if (row.address) profilePayload.address = row.address;
       if (row.workAddress) profilePayload.workAddess = row.workAddress;
 

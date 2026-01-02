@@ -8,16 +8,54 @@ import { parseCSV, parseExcel } from "../utils/parseFile.js";
 import connectDB from "../config/db.js";
 import ExcelJS from 'exceljs';
 
+import { getIO } from "../config/socket.js";
+import { onlineUsers } from "../config/socketStore.js";
+
 const getAllEvent = async (req, res) => {
   try {
+    const filters = { isActive: true }; // default condition
+
+    const {
+      area,
+      isCompleted,
+      name,
+      date,
+      place,
+    } = req.query;
+
+    // 🔹 Dynamic filters
+    if (area && mongoose.Types.ObjectId.isValid(area)) {
+      filters.area = new mongoose.Types.ObjectId(area);
+    }
+
+    if (isCompleted !== undefined) {
+      filters.isCompleted = isCompleted === "true";
+    }
+
+    if (name) {
+      filters.name = { $regex: name, $options: "i" };
+    }
+
+    if (place) {
+      filters.place = { $regex: place, $options: "i" };
+    }
+
+    if (date) {
+      const start = new Date(date);
+      const end = new Date(date);
+      end.setHours(23, 59, 59, 999);
+
+      filters.date = { $gte: start, $lte: end };
+    }
+
     const events = await Event.aggregate([
-      // 1️⃣ Match active events
-      { $match: { isActive: true } },
+      // 1️⃣ Match dynamic filters
+      { $match: filters },
 
       // 2️⃣ Lookup attendees
       {
         $lookup: {
-          from: "eventattendees", // Make sure this matches your MongoDB collection name
+          from: "eventattendees",
           localField: "_id",
           foreignField: "event",
           as: "attendees",
@@ -34,7 +72,25 @@ const getAllEvent = async (req, res) => {
         },
       },
 
-      // 4️⃣ Compute stats
+      // 4️⃣ Lookup area
+      {
+        $lookup: {
+          from: "areas",
+          localField: "area",
+          foreignField: "_id",
+          as: "area",
+        },
+      },
+
+      // 5️⃣ Unwind area
+      {
+        $unwind: {
+          path: "$area",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+
+      // 6️⃣ Compute stats
       {
         $addFields: {
           totalRegistered: { $size: "$attendees" },
@@ -69,20 +125,22 @@ const getAllEvent = async (req, res) => {
             },
           },
 
-          totalCallMade: {
-            $size: {
-              $ifNull: ["$calls", []], // If calls array is missing, count as 0
-            },
-          },
+          totalCallMade: { $size: "$calls" },
         },
       },
 
-      // 5️⃣ Format date and final output
+      // 7️⃣ Final projection
       {
         $project: {
           name: 1,
           place: 1,
           date: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+          area: {
+            _id: "$area._id",
+            name: "$area.name",
+            pincode: "$area.pincode",
+          },
+          isCompleted: 1,
           totalRegistered: 1,
           totalDonorVisited: 1,
           totalRejected: 1,
@@ -95,6 +153,7 @@ const getAllEvent = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Events fetched successfully",
+      total: events.length,
       events,
     });
   } catch (error) {
@@ -105,8 +164,6 @@ const getAllEvent = async (req, res) => {
     });
   }
 };
-
-
 
 
 const getEventDetailsById = async (req, res) => {
@@ -120,7 +177,7 @@ const getEventDetailsById = async (req, res) => {
       });
     }
 
-    const event = await Event.findById(id).lean();
+    const event = await Event.findById(id).populate({ path: "area", select: "name pincode" }).lean();
     if (!event) {
       return res.status(404).json({
         success: false,
@@ -177,8 +234,13 @@ const getEventDetailsById = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: {
+      event: {
+        id: event._id,
         name: event.name,
+        startTime: event.startTime,
+        endTime: event.startTime,
+        volunteers: event.volunteers,
+        area: event.area,
         date: event.date.toISOString().split("T")[0],
         place: event.place,
         totalRegistered,
@@ -188,6 +250,7 @@ const getEventDetailsById = async (req, res) => {
         totalCallMade, // ✅ now correct
         rejectionReasons,
         bloodGroupDistribution,
+        completed: event.isCompleted,
       },
     });
   } catch (error) {
@@ -208,7 +271,7 @@ const getRegisteredUsersByEvent = async (req, res) => {
   await connectDB();
   try {
     const { id } = req.params;
-    
+
     // const attendees = await EventAttendee.find({ event: id })
     //   .populate({
     //     path: "user",
@@ -219,28 +282,40 @@ const getRegisteredUsersByEvent = async (req, res) => {
     //     },
     //   })
     //   .lean();
-const attendees = await EventAttendee.find({ event: id })
+    const attendees = await EventAttendee.find({ event: id })
       .populate({
         path: "user",
-        select: "email contact",
-        populate: {
-          path: "profile",
-          model: "UserProfile",
-          populate: [
-            {
-              // populate referred user's profile
-              path: "referral.referredUser",
-              model: "UserProfile",
-              populate: {
-                // populate referred user's auth user to get contact
-                path: "authUser",
-                model: "AuthUser",
-                select: "contact email",
+        model: "AuthUser",
+        select: "email contact role",
+        populate: [
+          {
+            path: "role",          // ✅ populate role
+            model: "Role",
+            select: "name",   // role name + code
+          },
+          {
+            path: "profile",
+            model: "UserProfile",
+            populate: [
+              {
+                path: "referral.referredUser",
+                model: "UserProfile",
+                populate: {
+                  path: "authUser",
+                  model: "AuthUser",
+                  select: "contact email role",
+                  populate: {
+                    path: "role",
+                    model: "Role",
+                    select: "name code",
+                  },
+                },
               },
-            },
-          ],
-        },
-      });
+            ],
+          },
+        ],
+      })
+      .lean();
 
 
     const results = await Promise.all(
@@ -259,24 +334,20 @@ const attendees = await EventAttendee.find({ event: id })
           user: a.user._id,
         });
 
-console.log(a.user.profile?.referral);
+        // console.log(a.user.profile?.referral);
 
-        
+
         return {
           id: a.user._id,
-
           // ✅ NAME FROM USER PROFILE
           name: a.user.profile?.name || "",
-
+          role: a.user.role,
           email: a.user.email || "",
           contact: a.user.contact || "",
-
           bloodGroup: a.user.profile?.bloodGroup || "",
-
           status: a.status,
           rejectedReason: a.rejectedReason,
-          referredBy:a.user.profile?.referral?.referredUser ? a.user.profile.referral?.referredUser?.name: a.user.profile.referral?.type,
-          asas:"asas",
+          referredBy: a.user.profile?.referral?.referredUser ? a.user.profile.referral?.referredUser?.name : a.user.profile.referral?.type,
           totalCallMade,
           lastCallFeedback: lastCall?.description || "",
           lastCallTime: lastCall?.callTime || null,
@@ -302,6 +373,8 @@ console.log(a.user.profile?.referral);
 
 
 
+
+
 const getUnregisteredUsersByEvent = async (req, res) => {
   try {
     const { id } = req.params;
@@ -313,7 +386,17 @@ const getUnregisteredUsersByEvent = async (req, res) => {
       });
     }
 
+    // 1️⃣ Get event area
+    const event = await Event.findById(id).select("area").lean();
 
+    if (!event || !event.area) {
+      return res.status(404).json({
+        success: false,
+        message: "Event or event area not found",
+      });
+    }
+
+    // 2️⃣ Get already registered users
     const registeredUsers = await EventAttendee.find(
       { event: id },
       { user: 1 }
@@ -321,28 +404,35 @@ const getUnregisteredUsersByEvent = async (req, res) => {
 
     const registeredUserIds = registeredUsers.map((r) => r.user);
 
-
-    const users = await AuthUser.find({
+    // 3️⃣ Query users from SAME AREA as event
+    const userQuery = {
       _id: { $nin: registeredUserIds },
-      isActive: true,
-    })
-      .select("email contact")
+      area: event.area,          // ✅ EVENT AREA HERE           // optional but recommended
+    };
+
+    // 4️⃣ Fetch users
+    const users = await AuthUser.find(userQuery)
+      .select("email contact area")
       .populate({
         path: "profile",
         select: "name",
       })
+      .populate({
+        path: "area",
+        select: "name pincode",
+      })
       .lean();
 
-    /* 4️⃣ Response */
+    // 5️⃣ Response
     res.status(200).json({
       success: true,
       total: users.length,
       data: users.map((u) => ({
-        id: u._id,
+        _id: u._id,
         profile: {
           name: u.profile?.name || "",
-
         },
+        area: u.area || null,
         email: u.email || "",
         contact: u.contact || "",
       })),
@@ -357,10 +447,15 @@ const getUnregisteredUsersByEvent = async (req, res) => {
 };
 
 
+
+
+
 const registerUserToEvent = async (req, res) => {
   try {
     const { id } = req.params;
     const { userId, time } = req.body;
+
+    console.log(req.body);
 
     /* 1️⃣ Validate IDs */
     if (
@@ -448,24 +543,30 @@ const addEvent = async (req, res) => {
       place,
       description,
       isActive,
+      area,
+      volunteers, // [{ userId, roles: ["CALL","ATTENDANCE"] }]
     } = req.body;
 
-
-    if (!name || !date || !startTime || !endTime || !place) {
+    if (!name || !date || !startTime || !endTime || !place || !area) {
       return res.status(400).json({
         success: false,
         message: "Required fields are missing",
       });
     }
 
-
-    // let volunteerIds = [];
-    // if (Array.isArray(volunteers) && volunteers.length > 0) {
-    //   volunteerIds = volunteers.filter((id) =>
-    //     mongoose.Types.ObjectId.isValid(id)
-    //   );
-    // }
-
+    // Transform frontend volunteers into EventSchema format
+    let volunteerData = [];
+    if (Array.isArray(volunteers) && volunteers.length > 0) {
+      volunteerData = volunteers
+        .filter((v) => v.userId && mongoose.Types.ObjectId.isValid(v.userId))
+        .map((v) => ({
+          user: v.userId,
+          permissions: {
+            canCall: v.roles.includes("CALL"),
+            canAcceptAttendance: v.roles.includes("ATTENDANCE"),
+          },
+        }));
+    }
 
     const event = await Event.create({
       name,
@@ -473,9 +574,10 @@ const addEvent = async (req, res) => {
       startTime,
       endTime,
       place,
+      area,
       description: description || "",
-      //   volunteers: volunteerIds,
       isActive: isActive !== undefined ? isActive : true,
+      volunteers: volunteerData,
     });
 
     return res.status(201).json({
@@ -485,13 +587,15 @@ const addEvent = async (req, res) => {
     });
   } catch (error) {
     console.error("Add Event Error:", error);
-
     return res.status(500).json({
       success: false,
       message: "Server error",
     });
   }
 };
+
+
+
 
 const deleteEvent = async (req, res) => {
   try {
@@ -539,33 +643,160 @@ const deleteEvent = async (req, res) => {
 
 
 
+// const updateEventAttendeeStatus = async (req, res) => {
+//   try {
+//     const { id, userId } = req.params;
+//     const { status, description, rejectionReason, timeSlot, callStatus } = req.body;
+
+//     // 🔹 Handle CALL_MADE
+//     if (status === "CALL_MADE") {
+//       if (!callStatus) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Call status is required",
+//         });
+//       }
+
+//       const lastCall = await Call.findOne({ event: id, user: userId }).sort({ callNumber: -1 });
+//       const newCallNumber = lastCall ? lastCall.callNumber + 1 : 1;
+
+//       // Only require description if callStatus is ANSWERED AND no timeSlot provided
+//       if (callStatus === "ANSWERED" && !timeSlot && !description) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Description is required if time slot is not provided for answered calls",
+//         });
+//       }
+
+//       // Create call log
+//       const newCall = await Call.create({
+//         event: id,
+//         user: userId,
+//         callNumber: newCallNumber,
+//         description: callStatus === "ANSWERED" ? (description || "") : "",
+//         status: callStatus,
+//         callTime: new Date(),
+//       });
+
+//       // Only update attendee timeSlot if provided
+//       const attendeeUpdate = {};
+//       if (timeSlot) attendeeUpdate.checkInTime = timeSlot;
+//       attendeeUpdate.updatedAt = new Date();
+
+//       const attendee = await EventAttendee.findOneAndUpdate(
+//         { event: id, user: userId },
+//         attendeeUpdate,
+//         { new: true }
+//       );
+
+
+//       const io = getIO();
+//       const senderSocketId = onlineUsers.get(req.user.id.toString()); 
+
+      
+//       console.log(senderSocketId);
+      
+      
+//       // Broadcast to everyone except the sender
+//       io.sockets.sockets.forEach((socket) => {
+//         if (socket.id !== senderSocketId) {
+//           socket.emit("event-updated", {
+//             message: "Event updated successfully",
+//             user:
+//           });
+//         }
+//       });
+
+
+
+//       return res.status(200).json({
+//         success: true,
+//         message: "Call logged successfully",
+//         call: newCall,
+//         attendee,
+//       });
+//     }
+
+//     // 🔹 Handle DONATED / REJECTED
+//     const allowedStatus = ["PENDING", "DONATED", "REJECTED", "CANCELLED"];
+//     if (!allowedStatus.includes(status)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid status",
+//       });
+//     }
+
+//     if ((status === "DONATED" || status === "REJECTED") && !timeSlot) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Time slot is required",
+//       });
+//     }
+
+//     if (status === "REJECTED" && !rejectionReason) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Rejection reason is required",
+//       });
+//     }
+
+//     const updateData = {
+//       status,
+//       updatedAt: new Date(),
+//       timeSlot, // always update for DONATED / REJECTED
+//       rejectedReason: status === "REJECTED" ? rejectionReason : "",
+//     };
+
+//     const attendee = await EventAttendee.findOneAndUpdate(
+//       { event: id, user: userId },
+//       updateData,
+//       { new: true }
+//     );
+
+//     if (!attendee) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Attendee not found",
+//       });
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       message:
+//         status === "REJECTED"
+//           ? "User rejected successfully"
+//           : `User marked as ${status}`,
+//       attendee,
+//     });
+//   } catch (error) {
+//     console.error("Update Attendee Status Error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Server error",
+//     });
+//   }
+// };
+
+
+
+
+
+
+
 const updateEventAttendeeStatus = async (req, res) => {
   try {
     const { id, userId } = req.params;
     const { status, description, rejectionReason, timeSlot, callStatus } = req.body;
 
+    let attendeeUpdateData = {};
+    let callLog = null;
+
     // 🔹 Handle CALL_MADE
     if (status === "CALL_MADE") {
-      if (!callStatus) {
-        return res.status(400).json({
-          success: false,
-          message: "Call status is required",
-        });
-      }
-
       const lastCall = await Call.findOne({ event: id, user: userId }).sort({ callNumber: -1 });
       const newCallNumber = lastCall ? lastCall.callNumber + 1 : 1;
 
-      // Only require description if callStatus is ANSWERED AND no timeSlot provided
-      if (callStatus === "ANSWERED" && !timeSlot && !description) {
-        return res.status(400).json({
-          success: false,
-          message: "Description is required if time slot is not provided for answered calls",
-        });
-      }
-
-      // Create call log
-      const newCall = await Call.create({
+      callLog = await Call.create({
         event: id,
         user: userId,
         callNumber: newCallNumber,
@@ -574,84 +805,100 @@ const updateEventAttendeeStatus = async (req, res) => {
         callTime: new Date(),
       });
 
-      // Only update attendee timeSlot if provided
-      const attendeeUpdate = {};
-      if (timeSlot) attendeeUpdate.checkInTime = timeSlot;
-      attendeeUpdate.updatedAt = new Date();
-
-      const attendee = await EventAttendee.findOneAndUpdate(
-        { event: id, user: userId },
-        attendeeUpdate,
-        { new: true }
-      );
-
-      return res.status(200).json({
-        success: true,
-        message: "Call logged successfully",
-        call: newCall,
-        attendee,
-      });
+      if (timeSlot) attendeeUpdateData.checkInTime = timeSlot;
+      attendeeUpdateData.updatedAt = new Date();
+    } else {
+      attendeeUpdateData = {
+        status,
+        updatedAt: new Date(),
+        timeSlot,
+        rejectedReason: status === "REJECTED" ? rejectionReason : null,
+      };
     }
 
-    // 🔹 Handle DONATED / REJECTED
-    const allowedStatus = ["PENDING", "DONATED", "REJECTED", "CANCELLED"];
-    if (!allowedStatus.includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid status",
-      });
-    }
+    // Update attendee
+    const attendeeDoc = await EventAttendee.findOneAndUpdate(
+      { event: id, user: userId },
+      attendeeUpdateData,
+      { new: true }
+    )
+      .populate({
+        path: "user",
+        model: "AuthUser",
+        select: "email contact role",
+        populate: [
+          { path: "role", model: "Role", select: "name code" },
+          { path: "profile", model: "UserProfile", populate: [
+              { path: "referral.referredUser", model: "UserProfile", populate: {
+                  path: "authUser",
+                  model: "AuthUser",
+                  select: "contact email role",
+                  populate: { path: "role", model: "Role", select: "name code" },
+              } }
+          ] }
+        ]
+      })
+      .lean();
 
-    if ((status === "DONATED" || status === "REJECTED") && !timeSlot) {
-      return res.status(400).json({
-        success: false,
-        message: "Time slot is required",
-      });
-    }
+    if (!attendeeDoc) return res.status(404).json({ success: false, message: "Attendee not found" });
 
-    if (status === "REJECTED" && !rejectionReason) {
-      return res.status(400).json({
-        success: false,
-        message: "Rejection reason is required",
-      });
-    }
+    // 🔹 Format data exactly like getRegisteredUsersByEvent
+    const lastCall = await Call.findOne({ event: id, user: attendeeDoc.user._id })
+      .sort({ callNumber: -1 })
+      .lean();
+    const totalCallMade = await Call.countDocuments({ event: id, user: attendeeDoc.user._id });
 
-    const updateData = {
-      status,
-      updatedAt: new Date(),
-      timeSlot, // always update for DONATED / REJECTED
-      rejectedReason: status === "REJECTED" ? rejectionReason : "",
+    const formattedAttendee = {
+      id: attendeeDoc.user._id,
+      name: attendeeDoc.user.profile?.name || "",
+      role: attendeeDoc.user.role,
+      email: attendeeDoc.user.email || "",
+      contact: attendeeDoc.user.contact || "",
+      bloodGroup: attendeeDoc.user.profile?.bloodGroup || "",
+      status: attendeeDoc.status,
+      rejectedReason: attendeeDoc.rejectedReason,
+      referredBy: attendeeDoc.user.profile?.referral?.referredUser 
+        ? attendeeDoc.user.profile.referral.referredUser?.name 
+        : attendeeDoc.user.profile.referral?.type,
+      totalCallMade,
+      lastCallFeedback: lastCall?.description || "",
+      lastCallTime: lastCall?.callTime || null,
+      timeSloat: attendeeDoc.checkInTime,
+      callStatus: lastCall?.status,
     };
 
-    const attendee = await EventAttendee.findOneAndUpdate(
-      { event: id, user: userId },
-      updateData,
-      { new: true }
-    );
+    // 🔹 Broadcast to all except sender
+    const io = getIO();
+    // const senderSocketId = onlineUsers.get(req.user.id.toString());
 
-    if (!attendee) {
-      return res.status(404).json({
-        success: false,
-        message: "Attendee not found",
-      });
-    }
+    io.sockets.sockets.forEach((socket) => {
+      // if (socket.id !== senderSocketId) {
+        socket.emit("event-updated", {
+          message: "Attendee updated successfully",
+          attendee: formattedAttendee,
+        });
+      // }
+    });
 
+    // Respond to the API call
     return res.status(200).json({
       success: true,
-      message:
-        status === "REJECTED"
-          ? "User rejected successfully"
+      message: status === "REJECTED"
+        ? "User rejected successfully"
+        : status === "CALL_MADE"
+          ? "Call logged successfully"
           : `User marked as ${status}`,
-      attendee,
+      attendee: formattedAttendee,
+      call: callLog,
     });
+
   } catch (error) {
     console.error("Update Attendee Status Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
+
 
 
 
@@ -888,6 +1135,163 @@ const getEventReport = async (req, res) => {
   }
 };
 
+const updateEvent = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid event ID",
+      });
+    }
+
+    const {
+      name,
+      date,
+      startTime,
+      endTime,
+      place,
+      description,
+      area,
+      isActive,
+      completed,
+      volunteers,
+    } = req.body;
+
+    const event = await Event.findById(id);
+    if (!event) {
+      return res.status(404).json({
+        success: false,
+        message: "Event not found",
+      });
+    }
+
+    // 🔹 Basic field updates
+    if (name !== undefined) event.name = name;
+    if (date !== undefined) event.date = new Date(date);
+    if (startTime !== undefined) event.startTime = startTime;
+    if (endTime !== undefined) event.endTime = endTime;
+    if (place !== undefined) event.place = place;
+    if (description !== undefined) event.description = description;
+    if (area !== undefined) event.area = area;
+    if (isActive !== undefined) event.isActive = isActive;
+    if (completed !== undefined) event.isCompleted = completed;
+    // 🔹 Volunteers update (FULL REPLACE – safest)
+    if (Array.isArray(volunteers)) {
+      const formattedVolunteers = volunteers
+        .filter((v) => mongoose.Types.ObjectId.isValid(v.user))
+        .map((v) => ({
+          user: v.user,
+          permissions: {
+            canCall: Boolean(v.permissions?.canCall),
+            canAcceptAttendance: Boolean(
+              v.permissions?.canAcceptAttendance
+            ),
+          },
+          assignedAt: new Date(),
+        }));
+
+      event.volunteers = formattedVolunteers;
+    }
+
+    await event.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Event updated successfully",
+      event,
+    });
+  } catch (error) {
+    console.error("Update Event Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
 
 
-export { getEventReport, registerUsersToEventFromFile, getAllEvent, getEventDetailsById, addEvent, deleteEvent, getRegisteredUsersByEvent, getUnregisteredUsersByEvent, registerUserToEvent, updateEventAttendeeStatus };
+
+
+const getEventPermission = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const role = req.user?.role;
+
+    // Validate Event ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Event ID",
+      });
+    }
+
+    // SUPER_ADMIN or ADMIN → full permissions
+    if (role === "SUPER_ADMIN" || role === "ADMIN") {
+      return res.status(200).json({
+        success: true,
+        permission: true,
+        permissions: {
+          canCall: true,
+          canAcceptAttendance: true,
+        },
+      });
+    }
+
+    // Fetch event volunteers
+    const event = await Event.findById(id)
+      .select("volunteers")
+      .lean();
+
+    if (!event) {
+      return res.status(404).json({
+        success: false,
+        message: "Event not found",
+      });
+    }
+
+    // VOLUNTEER → check if present in volunteers
+    if (role === "VOLUNTEER") {
+      const volunteer = event.volunteers.find(
+        (v) => v.user.toString() === userId.toString()
+      );
+
+      if (!volunteer) {
+        return res.status(200).json({
+          success: true,
+          permission: false,
+        });
+      }
+
+      // Return assigned permissions
+      return res.status(200).json({
+        success: true,
+        permission: true,
+        permissions: {
+          canCall: volunteer.permissions.canCall,
+          canAcceptAttendance: volunteer.permissions.canAcceptAttendance,
+        },
+      });
+    }
+
+    // USER or others → no permission
+    return res.status(200).json({
+      success: true,
+      permission: false,
+    });
+  } catch (error) {
+    console.error("Event Permission Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
+
+
+
+
+export { getEventReport, getEventPermission, registerUsersToEventFromFile, updateEvent, getAllEvent, getEventDetailsById, addEvent, deleteEvent, getRegisteredUsersByEvent, getUnregisteredUsersByEvent, registerUserToEvent, updateEventAttendeeStatus };

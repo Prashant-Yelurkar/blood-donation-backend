@@ -12,13 +12,19 @@ const EventSchema = new mongoose.Schema(
       required: true,
     },
 
+    area: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Area",
+      required: true,
+    },
+
     startTime: {
-      type: String, // "10:00"
+      type: String,
       required: true,
     },
 
     endTime: {
-      type: String, // "16:00"
+      type: String,
       required: true,
     },
 
@@ -31,17 +37,40 @@ const EventSchema = new mongoose.Schema(
       type: String,
     },
 
-    // volunteers: [
-    //   {
-    //     type: mongoose.Schema.Types.ObjectId,
-    //     ref: "AuthUser",
-    //   },
-    // ],
+    volunteers: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "AuthUser",
+          required: true,
+        },
+
+        permissions: {
+          canCall: {
+            type: Boolean,
+            default: false,
+          },
+          canAcceptAttendance: {
+            type: Boolean,
+            default: false,
+          },
+        },
+
+        assignedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
 
     isActive: {
       type: Boolean,
       default: true,
     },
+    isCompleted:{
+      type: Boolean,
+      default: false,
+    }
   },
   { timestamps: true }
 );

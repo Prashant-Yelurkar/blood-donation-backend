@@ -27,7 +27,10 @@ const authUserSchema = new mongoose.Schema(
       ref: "Role",
       required: true,
     },
-
+    area:{
+      type: mongoose.Schema.Types.ObjectId,
+      ref:"Area",
+    },
     isActive: {
       type: Boolean,
       default: true,

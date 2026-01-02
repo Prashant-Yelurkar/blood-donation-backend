@@ -7,9 +7,8 @@ import connectDB from "../config/db.js";
 
 router.post("/login", login);
 router.get("/verify", protect , async(req, res) => {  
-      await connectDB();
-    const user = await UserProfile.findOne({ authUser: req.user.userId }).select("name");          
-    res.status(200).json({ message: "Token is valid", user: {...req.user, name: user?.name}, success:true });
+    const user = await UserProfile.findOne({ authUser: req.user.userId }).select("name");   
+    res.status(200).json({ message: "Token is valid", user: {...req.user, name: user?.name }, success:true });
 });
 
 export default router;  

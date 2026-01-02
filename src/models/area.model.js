@@ -5,24 +5,25 @@ const areaSchema = new mongoose.Schema(
     name: {
       type: String,
       required: true,
+      unique: true,
       trim: true,
     },
 
-    city: {
-      type: String,
-      required: true,
-      trim: true,
-    },
+    // city: {
+    //   type: String,
+    //   required: true,
+    //   trim: true,
+    // },
 
-    district: {
-      type: String,
-      trim: true,
-    },
+    // district: {
+    //   type: String,
+    //   trim: true,
+    // },
 
-    state: {
-      type: String,
-      trim: true,
-    },
+    // state: {
+    //   type: String,
+    //   trim: true,
+    // },
 
     pincode: {
       type: String,
@@ -30,16 +31,16 @@ const areaSchema = new mongoose.Schema(
     },
 
     // Optional geo-location (future use: maps, distance)
-    location: {
-      type: {
-        type: String,
-        enum: ["Point"],
-        default: "Point",
-      },
-      coordinates: {
-        type: [Number], // [longitude, latitude]
-      },
-    },
+    // location: {
+    //   type: {
+    //     type: String,
+    //     enum: ["Point"],
+    //     default: "Point",
+    //   },
+    //   coordinates: {
+    //     type: [Number], // [longitude, latitude]
+    //   },
+    // },
 
     isActive: {
       type: Boolean,

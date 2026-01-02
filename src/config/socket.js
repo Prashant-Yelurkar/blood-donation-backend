@@ -1,35 +1,39 @@
 import { Server } from "socket.io";
+import { onlineUsers } from "./socketStore.js";
 
 let io;
 
-const initSocket = (httpServer) => {
-  io = new Server(httpServer, {
+export const initSocket = (server) => {
+  io = new Server(server, {
     cors: {
-      origin: "*", 
-      methods: ["GET", "POST"],
+      origin: "*", // adjust for production
     },
   });
 
   io.on("connection", (socket) => {
-    console.log("🔌 Socket connected:", socket.id);
-    socket.on("donor-added", (data) => {
-      console.log("🩸 Donor added:", data);
-      socket.broadcast.emit("donor-updated", data);
+    console.log("⚡ New socket connected:", socket.id);
+
+    // Register user
+    socket.on("register-user", (userId) => {
+      onlineUsers.set(userId, socket.id);
+      socket.userId = userId; // attach userId to socket
+      console.log("✅ User registered on socket:", userId);
     });
 
+    // Handle disconnect
     socket.on("disconnect", () => {
-      console.log("❌ Socket disconnected:", socket.id);
+      if (socket.userId) {
+        onlineUsers.delete(socket.userId);
+        console.log("⚠️ User disconnected:", socket.userId);
+      }
     });
   });
 
   return io;
 };
 
-const getIO = () => {
-  if (!io) {
-    throw new Error("Socket.io not initialized!");
-  }
+// Helper to get io instance
+export const getIO = () => {
+  if (!io) throw new Error("Socket.io not initialized!");
   return io;
 };
-
-export { initSocket, getIO };

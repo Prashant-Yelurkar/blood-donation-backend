@@ -5,47 +5,134 @@ import mongoose from "mongoose";
 import UserProfile from "../models/userProfile.model.js";
 import { parseCSV, parseExcel } from "../utils/parseFile.js";
 import connectDB from "../config/db.js";
+import Area from "../models/area.model.js";
+
+// const getAllVolunteers = async (req, res) => {
+
+//   try {
+//     const role = await Role.findOne({ name: "VOLUNTEER" });
+//     if (!role) {
+//       return res.status(404).json({
+//         message: "Volunteer role not found",
+//         success: false,
+//       });
+//     }
+
+//     const volunteers = await AuthUser.find({
+//       role: role._id,
+//     })
+//       .select("email contact isActive")
+//       .populate({
+//         path: "profile",
+//         select: "name dob age",
+//       }).populate({
+//         path:"area",
+//         select:"name pincode",
+//       });
+
+//     if (!volunteers.length) {
+//       return res.status(404).json({
+//         message: "No volunteers found",
+//         success: false,
+//       });
+//     }
+
+//     res.status(200).json({
+//       message: "Get all volunteers",
+//       success: true,
+//       volunteers,
+//     });
+//   } catch (error) {
+//     console.error(error);
+//     res.status(500).json({
+//       message: "Server error",
+//       success: false,
+//     });
+//   }
+// };
+
+
+
 
 const getAllVolunteers = async (req, res) => {
   try {
+    const filters = req.query;
+
+    // 1️⃣ Get volunteer role
     const role = await Role.findOne({ name: "VOLUNTEER" });
     if (!role) {
       return res.status(404).json({
-        message: "Volunteer role not found",
         success: false,
+        message: "Volunteer role not found",
       });
     }
 
-    const volunteers = await AuthUser.find({
+    // 2️⃣ Base Mongo query
+    const query = {
       role: role._id,
-      isActive: true,
-    })
-      .select("email contact")
+    };
+
+    // 3️⃣ DB-level filters
+    if (filters.area && mongoose.Types.ObjectId.isValid(filters.area)) {
+      query.area = new mongoose.Types.ObjectId(filters.area);
+    }
+
+    if (filters.isActive !== undefined) {
+      query.isActive = filters.isActive === "true";
+    }
+
+    if (filters.email) {
+      query.email = { $regex: filters.email, $options: "i" };
+    }
+
+    if (filters.contact) {
+      query.contact = { $regex: filters.contact, $options: "i" };
+    }
+
+    // 4️⃣ Fetch volunteers
+    let volunteers = await AuthUser.find(query)
+      .select("email contact isActive area")
       .populate({
         path: "profile",
-        select: "name dob age",
-      });
+        select: "name -authUser",
+      })
+      .populate({
+        path: "area",
+        select: "name pincode",
+      })
+      .lean({ virtuals: true });
 
-    if (!volunteers.length) {
-      return res.status(404).json({
-        message: "No volunteers found",
-        success: false,
-      });
+    // 5️⃣ JS-level filters (virtual / populated)
+    if (filters.name) {
+      const keyword = filters.name.toLowerCase();
+      volunteers = volunteers.filter(
+        (v) => v?.profile?.name?.toLowerCase().includes(keyword)
+      );
+    }
+
+    if (filters.pincode) {
+      volunteers = volunteers.filter(
+        (v) => v?.area?.pincode?.includes(filters.pincode)
+      );
     }
 
     res.status(200).json({
-      message: "Get all volunteers",
       success: true,
+      total: volunteers.length,
       volunteers,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Get Volunteers Error:", error);
     res.status(500).json({
-      message: "Server error",
       success: false,
+      message: "Server error",
     });
   }
 };
+
+
+
+
 
 
 const getVolunteerById = async (req, res) => {
@@ -62,14 +149,17 @@ const getVolunteerById = async (req, res) => {
       role: role._id,
       _id: new mongoose.Types.ObjectId(req.params.id),
     })
-      .select("email contact")
+      .select("email contact isActive")
       .populate({
         path: "profile",
         select: "name dob age gender bloodGroup weight lastDonationDate address workAddress",
+      })
+      .populate({
+        path: "area",
+        select: "id, name, pincode"
       });
 
-      console.log(volunteer);
-      
+
     if (!volunteer) {
       return res.status(404).json({
         message: "Volunteer not found",
@@ -106,9 +196,11 @@ const addVolunteer = async (req, res) => {
       address,
       workAddress,
       lastDonationDate,
+      area,
+      isActive,
     } = req.body;
 
-    if ((!email && !contact) || !name || !gender) {
+    if ((!email && !contact) || !name || !gender || !area) {
       return res.status(400).json({ success: false, message: "Required fields are missing" });
     }
 
@@ -125,18 +217,20 @@ const addVolunteer = async (req, res) => {
     if (existingUser)
       return res.status(409).json({ success: false, message: "Email or contact already exists" });
 
+    const place = await Area.findById(area);
+    if (!place)
+      return res.status(409).json({ success: false, message: "Area not found" });
 
     const authUserData = {
       password: await hashPassword(name.split(" ")[0].toLowerCase() + "@123"),
       role: role._id,
-      isActive: true,
+      isActive: isActive,
+      area: place._id,
     };
 
     if (email?.trim()) authUserData.email = email.trim();
     if (contact?.trim()) authUserData.contact = contact.trim();
-
     const newVolunteer = await AuthUser.create(authUserData);
-
 
     const userProfileData = { authUser: newVolunteer._id };
     if (name) userProfileData.name = name;
@@ -151,7 +245,7 @@ const addVolunteer = async (req, res) => {
     try {
       await UserProfile.create(userProfileData);
     } catch (err) {
-  
+
       await AuthUser.deleteOne({ _id: newVolunteer._id });
       throw err;
     }
@@ -184,7 +278,11 @@ const updateVolunteer = async (req, res) => {
       address,
       workAddress,
       lastDonationDate,
+      area,
+      isActive,
     } = req.body;
+    console.log(req.body);
+
 
     const role = await Role.findOne({ name: "VOLUNTEER" });
     if (!role) {
@@ -197,7 +295,6 @@ const updateVolunteer = async (req, res) => {
     const volunteer = await AuthUser.findOne({
       _id: id,
       role: role._id,
-      isActive: true,
     });
 
     if (!volunteer) {
@@ -225,9 +322,21 @@ const updateVolunteer = async (req, res) => {
     }
 
 
+
     const authUpdate = {};
     if (email) authUpdate.email = email;
     if (contact) authUpdate.contact = contact;
+
+
+    if (isActive !== undefined) {
+      isActive === true || isActive === "true";
+      authUpdate.isActive = isActive;
+    }
+
+
+    if (area) {
+      authUpdate.area = area;
+    }
 
     if (Object.keys(authUpdate).length) {
       await AuthUser.updateOne({ _id: id }, { $set: authUpdate });
@@ -245,7 +354,7 @@ const updateVolunteer = async (req, res) => {
     if (lastDonationDate) profileUpdate.lastDonationDate = lastDonationDate;
 
     console.log(profileUpdate);
-    
+
     if (Object.keys(profileUpdate).length) {
       await UserProfile.updateOne(
         { authUser: id },
@@ -363,7 +472,7 @@ const seedVolunteers = async (req, res) => {
       const row = records[i];
 
       // Required validation
-      if (!row.name || !row.gender || (!row.email && !row.contact)) {
+      if (!row.name || !row.gender || (!row.email && !row.contact) || !row.area)  {
         errors.push(`Row ${i + 1}: Missing required fields`);
         continue;
       }
@@ -382,8 +491,6 @@ const seedVolunteers = async (req, res) => {
       const exists = conditions.length
         ? await AuthUser.findOne({ $or: conditions })
         : null;
-      console.log(exists);
-
       if (exists) {
         skipped.push(i + 1);
         continue;
@@ -398,6 +505,15 @@ const seedVolunteers = async (req, res) => {
 
       if (email) authUserPayload.email = email;
       if (contact) authUserPayload.contact = contact;
+      const area = await Area.findOne({name:row.area});
+      
+      if (!area)
+      {
+        skipped.push(i + 1);
+        continue;
+      }
+      if(area) authUserPayload.area = area._id;
+     
 
       const authUser = await AuthUser.create(authUserPayload);
 

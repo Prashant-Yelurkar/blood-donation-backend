@@ -5,8 +5,6 @@ import { generateToken } from "../utils/jwt.js";
 import connectDB from "../config/db.js";
 const login = async (req, res) => {
     try {
-        console.log("here");
-        
         await connectDB();
         const { identifier, password } = req.body;
         if (!identifier || !password) {
@@ -15,10 +13,14 @@ const login = async (req, res) => {
                 .json({ message: "Email and password are required" });
         }
         const user = await AuthUser.findOne({
-            $or: [{ email: identifier }, { contact: identifier }],
+            $or: [
+                { email: identifier.toLowerCase() },
+                { contact: identifier.replace(/\s+/g, "") },
+            ],
         })
-            .select("+password")
-            .populate("role");
+            .select("+password tokenVersion area role")
+            .populate("role", "name")
+            .populate("area", "name pincode")
 
         if (!user) {
             return res.status(404).json({ message: "User not found" });
@@ -33,13 +35,17 @@ const login = async (req, res) => {
             role: user.role.name,
             tokenVersion: user.tokenVersion,
         });
-
         res.status(200).json({
             jwt: token,
             user: {
                 name: profile?.name,
                 role: user.role.name,
-                userId: user._id,
+                id: user._id,
+                area: user.area ? {
+                    name:user.area.name,
+                    id:user.area._id,
+                    pincode:user.area.pincode
+                }: null,
             },
             message: "Login successful",
         });
@@ -47,8 +53,6 @@ const login = async (req, res) => {
         console.error(err);
         return res.status(500).json({ message: "Internal Server Error" });
     }
-
-    return res.json({ message: "Login successful" });
 };
 
 export { login };
