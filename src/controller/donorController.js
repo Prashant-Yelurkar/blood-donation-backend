@@ -255,7 +255,7 @@ const addDonor = async (req, res) => {
     }
     const authUserData = {
       password: await hashPassword(
-        name.split(" ")[0].toLowerCase() + "@123"
+         "blood@123",
       ),
       role: role._id,
       isActive: true,
@@ -516,7 +516,7 @@ const seedDonor = async (req, res) => {
       }
 
       // 2️⃣ Create AuthUser
-      const hashedPassword = await hashPassword(String(row.contact));
+      const hashedPassword = await hashPassword( "blood@123");
       const authUserPayload = {
         password: hashedPassword,
         role: donorRole._id,

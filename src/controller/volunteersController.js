@@ -222,7 +222,7 @@ const addVolunteer = async (req, res) => {
       return res.status(409).json({ success: false, message: "Area not found" });
 
     const authUserData = {
-      password: await hashPassword(name.split(" ")[0].toLowerCase() + "@123"),
+      password: await hashPassword("blood@123"),
       role: role._id,
       isActive: isActive,
       area: place._id,
@@ -497,7 +497,7 @@ const seedVolunteers = async (req, res) => {
       }
 
       // 4️⃣ Create AuthUser
-      const hashedPassword = await hashPassword(String(row.contact));
+      const hashedPassword = await hashPassword( "blood@123");
       const authUserPayload = {
         password: hashedPassword,
         role: volunteerRole._id,
