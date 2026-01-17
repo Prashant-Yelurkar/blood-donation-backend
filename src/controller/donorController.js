@@ -12,8 +12,8 @@ import Area from "../models/area.model.js";
 const getAllDonor = async (req, res) => {
   try {
     const filters = req.query;
-   
-    
+
+
     // 1️⃣ Get volunteer role
     const role = await Role.findOne({ name: "USER" });
     if (!role) {
@@ -44,7 +44,7 @@ const getAllDonor = async (req, res) => {
     if (filters.contact) {
       query.contact = { $regex: filters.contact, $options: "i" };
     }
-     console.log(filters);
+    console.log(filters);
 
     // 4️⃣ Fetch volunteers
     let donor = await AuthUser.find(query)
@@ -76,7 +76,7 @@ const getAllDonor = async (req, res) => {
     res.status(200).json({
       success: true,
       total: donor.length,
-      donors:donor,
+      donors: donor,
     });
   } catch (error) {
     console.error("Get Volunteers Error:", error);
@@ -88,49 +88,6 @@ const getAllDonor = async (req, res) => {
 };
 
 
-
-// const getAllDonor = async (req, res) => {
-//   try {
-//     const role = await Role.findOne({ name: "USER" });
-//     if (!role) {
-//       return res.status(404).json({
-//         message: "Volunteer role not found",
-//         success: false,
-//       });
-//     }
-
-//     const donors = await AuthUser.find({
-//       role: role._id,
-//     })
-//       .select("email contact isActive")
-//       .populate({
-//         path: "profile",
-//         select: "name dob age",
-//       }).populate({
-//         path:"area",
-//         select:"name pincode",
-//       });
-
-//     if (!donors.length) {
-//       return res.status(404).json({
-//         message: "No donors found",
-//         success: false,
-//       });
-//     }
-
-//     res.status(200).json({
-//       message: "Get all donor",
-//       success: true,
-//       donors,
-//     });
-//   } catch (error) {
-//     console.error(error);
-//     res.status(500).json({
-//       message: "Server error",
-//       success: false,
-//     });
-//   }
-// };
 
 
 const getDonorById = async (req, res) => {
@@ -162,22 +119,27 @@ const getDonorById = async (req, res) => {
       return res.status(404).json({ success: false, message: "Donor not found" });
     }
 
-    // convert to plain object ✅
     const donor = donorDoc.toObject();
-
     if (
       donor?.profile?.referral?.type === "USER" &&
       donor?.profile?.referral?.referredUser
     ) {
-      const refProfile = await UserProfile.findOne({
-        authUser: donor.profile.referral.referredUser,
-      }).select("name");
-      
+      const refProfile = await AuthUser.findById(
+        donor.profile.referral.referredUser
+      )
+        .populate({
+          path: "profile",
+          select:
+            "name",
+        })
+        .lean();
+
       donor.profile.referral = {
         ...donor.profile.referral,
-        name: refProfile?.name || null,
+        name: refProfile?.profile?.name || null,
       };
     }
+
 
     return res.status(200).json({
       success: true,
@@ -255,7 +217,7 @@ const addDonor = async (req, res) => {
     }
     const authUserData = {
       password: await hashPassword(
-         "blood@123",
+        "blood@123",
       ),
       role: role._id,
       isActive: true,
@@ -271,7 +233,7 @@ const addDonor = async (req, res) => {
     let signupSource = "DIRECT";
 
     if (referredBy && mongoose.Types.ObjectId.isValid(referredBy)) {
-      const referredProfile = await AuthUser.findById( referredBy );
+      const referredProfile = await AuthUser.findById(referredBy);
 
       if (referredProfile) {
         referralData = { type: "USER", referredUser: referredProfile._id };
@@ -371,12 +333,12 @@ const updateDonor = async (req, res) => {
     const authUpdate = {};
     if (email) authUpdate.email = email.trim();
     if (contact) authUpdate.contact = contact.trim();
- 
+
     if (area) {
-      authUpdate.area = area;
+      authUpdate.area = area._id;
     }
     if (isActive !== undefined) {
-      isActive  === true || isActive === "true";
+      isActive === true || isActive === "true";
       authUpdate.isActive = isActive;
     }
 
@@ -394,7 +356,8 @@ const updateDonor = async (req, res) => {
     if (address) profileUpdate.address = address;
     if (workAddress) profileUpdate.workAddress = workAddress;
     if (lastDonationDate) profileUpdate.lastDonationDate = lastDonationDate;
-    if(referral) profileUpdate.referral = referral;
+    if (referral) profileUpdate.referral = referral;
+
 
 
 
@@ -421,7 +384,7 @@ const deleteDonor = async (req, res) => {
     const { id } = req.params;
 
     console.log(id);
-    
+
     const role = await Role.findOne({ name: "USER" });
     if (!role) {
       return res.status(404).json({
@@ -493,7 +456,7 @@ const seedDonor = async (req, res) => {
       const row = records[i];
 
       // 🔴 Required validation
-      if (!row.name || !row.gender || !row.area|| (!row.email && !row.contact)) {
+      if (!row.name || !row.gender || !row.area || (!row.email && !row.contact)) {
         errors.push(`Row ${i + 1}: Missing required fields`);
         continue;
       }
@@ -516,7 +479,7 @@ const seedDonor = async (req, res) => {
       }
 
       // 2️⃣ Create AuthUser
-      const hashedPassword = await hashPassword( "blood@123");
+      const hashedPassword = await hashPassword("blood@123");
       const authUserPayload = {
         password: hashedPassword,
         role: donorRole._id,
@@ -524,14 +487,13 @@ const seedDonor = async (req, res) => {
 
       if (email) authUserPayload.email = email;
       if (contact) authUserPayload.contact = contact;
-      const area = await Area.findOne({name:row.area});
-      
-      if (!area)
-      {
+      const area = await Area.findOne({ name: row.area });
+
+      if (!area) {
         skipped.push(i + 1);
         continue;
       }
-      if(area) authUserPayload.area = area._id;
+      if (area) authUserPayload.area = area._id;
 
       const authUser = await AuthUser.create(authUserPayload);
 
@@ -561,7 +523,7 @@ const seedDonor = async (req, res) => {
           if (refProfile) {
             referral = {
               type: "USER",
-              referredUser: refProfile._id,
+              referredUser: refAuth._id,
             };
           }
         } else if (row.refrence) {

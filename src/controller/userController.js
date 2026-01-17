@@ -13,7 +13,7 @@ const getAllUsers = async (req, res) => {
   try {
     const filters = req.query;
 
-console.log(filters.area);
+
 
     const query = {
     };

@@ -7,50 +7,6 @@ import { parseCSV, parseExcel } from "../utils/parseFile.js";
 import connectDB from "../config/db.js";
 import Area from "../models/area.model.js";
 
-// const getAllVolunteers = async (req, res) => {
-
-//   try {
-//     const role = await Role.findOne({ name: "VOLUNTEER" });
-//     if (!role) {
-//       return res.status(404).json({
-//         message: "Volunteer role not found",
-//         success: false,
-//       });
-//     }
-
-//     const volunteers = await AuthUser.find({
-//       role: role._id,
-//     })
-//       .select("email contact isActive")
-//       .populate({
-//         path: "profile",
-//         select: "name dob age",
-//       }).populate({
-//         path:"area",
-//         select:"name pincode",
-//       });
-
-//     if (!volunteers.length) {
-//       return res.status(404).json({
-//         message: "No volunteers found",
-//         success: false,
-//       });
-//     }
-
-//     res.status(200).json({
-//       message: "Get all volunteers",
-//       success: true,
-//       volunteers,
-//     });
-//   } catch (error) {
-//     console.error(error);
-//     res.status(500).json({
-//       message: "Server error",
-//       success: false,
-//     });
-//   }
-// };
-
 
 
 
@@ -149,14 +105,14 @@ const getVolunteerById = async (req, res) => {
       role: role._id,
       _id: new mongoose.Types.ObjectId(req.params.id),
     })
-      .select("email contact isActive")
+      .select("email contact isActive area")
       .populate({
         path: "profile",
         select: "name dob age gender bloodGroup weight lastDonationDate address workAddress",
       })
       .populate({
         path: "area",
-        select: "id, name, pincode"
+        select: "id name pincode"
       });
 
 
@@ -335,7 +291,7 @@ const updateVolunteer = async (req, res) => {
 
 
     if (area) {
-      authUpdate.area = area;
+      authUpdate.area = area._id;
     }
 
     if (Object.keys(authUpdate).length) {

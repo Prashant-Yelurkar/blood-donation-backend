@@ -133,7 +133,7 @@ const getAreas = async (req, res) => {
                 $expr: {
                   $and: [
                     { $eq: ["$area", "$$areaId"] },
-                    { $eq: ["$isActive", true] },
+                    // { $eq: ["$isActive", true] },
                   ],
                 },
               },
@@ -147,7 +147,7 @@ const getAreas = async (req, res) => {
               },
             },
             { $unwind: "$role" },
-            { $match: { "role.name": "DONOR" } },
+            { $match: { "role.name": "USER" } },
           ],
           as: "donors",
         },
@@ -352,9 +352,7 @@ const deleteArea = async (req, res) => {
 
 
 
-const seedAreas = async (req, res) => {
-  console.log("here");
-  
+const seedAreas = async (req, res) => {  
   try {
     const added = [];
     const alreadyPresent = [];

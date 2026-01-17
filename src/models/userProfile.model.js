@@ -49,13 +49,13 @@ const userProfileSchema = new mongoose.Schema(
     referral: {
       type: {
         type: String,
-        enum: ["USER", "DOOR_TO_DOOR", "DESK", "DIRECT" ,"CAMP_2024"],
+        enum: ["USER", "DOOR_TO_DOOR", "DESK", "DIRECT" ,"CAMP_2024" , "CAMP_2025"],
         default: "DIRECT",
       },
 
       referredUser: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "UserProfile",
+        ref: "AuthUser",
         default: null,
       },
     },

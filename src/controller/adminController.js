@@ -267,8 +267,10 @@ const updateAdmin = async (req, res) => {
 
    
     if (area) {
-      authUpdate.area = area;
+      authUpdate.area = area._id;
     }
+    console.log(authUpdate);
+    
 
     if (Object.keys(authUpdate).length) {
       await AuthUser.updateOne({ _id: id }, { $set: authUpdate });

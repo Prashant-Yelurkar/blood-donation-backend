@@ -275,47 +275,75 @@ const getRegisteredUsersByEvent = async (req, res) => {
     // const attendees = await EventAttendee.find({ event: id })
     //   .populate({
     //     path: "user",
-    //     select: "email contact profile",
-    //     populate: {
-    //       path: "profile",
-    //       select: "name bloodGroup",
-    //     },
+    //     model: "AuthUser",
+    //     select: "email contact role",
+    //     populate: [
+    //       {
+    //         path: "role",          // ✅ populate role
+    //         model: "Role",
+    //         select: "name",   // role name + code
+    //       },
+    //       {
+    //         path: "profile",
+    //         model: "UserProfile",
+    //         populate: [
+    //           {
+    //             path: "referral.referredUser",
+    //             model: "UserProfile",
+    //             populate: {
+    //               path: "authUser",
+    //               model: "AuthUser",
+    //               select: "contact email role",
+    //               populate: {
+    //                 path: "role",
+    //                 model: "Role",
+    //                 select: "name code",
+    //               },
+    //             },
+    //           },
+    //         ],
+    //       },
+    //     ],
     //   })
     //   .lean();
+
     const attendees = await EventAttendee.find({ event: id })
       .populate({
         path: "user",
         model: "AuthUser",
-        select: "email contact role",
+        select: "email contact role profile",
         populate: [
           {
-            path: "role",          // ✅ populate role
+            path: "role",
             model: "Role",
-            select: "name",   // role name + code
+            select: "name code",
           },
           {
             path: "profile",
             model: "UserProfile",
-            populate: [
-              {
-                path: "referral.referredUser",
-                model: "UserProfile",
-                populate: {
-                  path: "authUser",
-                  model: "AuthUser",
-                  select: "contact email role",
-                  populate: {
-                    path: "role",
-                    model: "Role",
-                    select: "name code",
-                  },
+            populate: {
+              path: "referral.referredUser",   // ✅ referral points to AuthUser
+              model: "AuthUser",
+              select: "email contact role profile",
+              populate: [
+                {
+                  path: "role",
+                  model: "Role",
+                  select: "name code",
                 },
-              },
-            ],
+                {
+                  path: "profile",
+                  model: "UserProfile",
+                  select: "name bloodGroup",
+                },
+              ],
+            },
           },
         ],
       })
       .lean();
+
+    // console.log(attendees[0].user.profile.referral.referredUser.profile.name);
 
 
     const results = await Promise.all(
@@ -334,8 +362,6 @@ const getRegisteredUsersByEvent = async (req, res) => {
           user: a.user._id,
         });
 
-        // console.log(a.user.profile?.referral);
-
 
         return {
           id: a.user._id,
@@ -347,7 +373,7 @@ const getRegisteredUsersByEvent = async (req, res) => {
           bloodGroup: a.user.profile?.bloodGroup || "",
           status: a.status,
           rejectedReason: a.rejectedReason,
-          referredBy: a.user.profile?.referral?.referredUser ? a.user.profile.referral?.referredUser?.name : a.user.profile.referral?.type,
+          referredBy: a.user.profile?.referral?.referredUser ? a.user?.profile.referral.referredUser?.profile?.name : a.user.profile?.referral?.type,
           totalCallMade,
           lastCallFeedback: lastCall?.description || "",
           lastCallTime: lastCall?.callTime || null,
@@ -693,10 +719,10 @@ const deleteEvent = async (req, res) => {
 //       const io = getIO();
 //       const senderSocketId = onlineUsers.get(req.user.id.toString()); 
 
-      
+
 //       console.log(senderSocketId);
-      
-      
+
+
 //       // Broadcast to everyone except the sender
 //       io.sockets.sockets.forEach((socket) => {
 //         if (socket.id !== senderSocketId) {
@@ -828,17 +854,23 @@ const updateEventAttendeeStatus = async (req, res) => {
         select: "email contact role",
         populate: [
           { path: "role", model: "Role", select: "name code" },
-          { path: "profile", model: "UserProfile", populate: [
-              { path: "referral.referredUser", model: "UserProfile", populate: {
+          {
+            path: "profile", model: "UserProfile", populate: [
+              {
+                path: "referral.referredUser", model: "UserProfile", populate: {
                   path: "authUser",
                   model: "AuthUser",
                   select: "contact email role",
                   populate: { path: "role", model: "Role", select: "name code" },
-              } }
-          ] }
+                }
+              }
+            ]
+          }
         ]
       })
       .lean();
+    console.log(attendeeDoc.user.profile);
+
 
     if (!attendeeDoc) return res.status(404).json({ success: false, message: "Attendee not found" });
 
@@ -857,8 +889,8 @@ const updateEventAttendeeStatus = async (req, res) => {
       bloodGroup: attendeeDoc.user.profile?.bloodGroup || "",
       status: attendeeDoc.status,
       rejectedReason: attendeeDoc.rejectedReason,
-      referredBy: attendeeDoc.user.profile?.referral?.referredUser 
-        ? attendeeDoc.user.profile.referral.referredUser?.name 
+      referredBy: attendeeDoc.user.profile?.referral?.referredUser
+        ? attendeeDoc.user.profile.referral.referredUser?.name
         : attendeeDoc.user.profile.referral?.type,
       totalCallMade,
       lastCallFeedback: lastCall?.description || "",
@@ -873,10 +905,10 @@ const updateEventAttendeeStatus = async (req, res) => {
 
     io.sockets.sockets.forEach((socket) => {
       // if (socket.id !== senderSocketId) {
-        socket.emit("event-updated", {
-          message: "Attendee updated successfully",
-          attendee: formattedAttendee,
-        });
+      socket.emit("event-updated", {
+        message: "Attendee updated successfully",
+        attendee: formattedAttendee,
+      });
       // }
     });
 
@@ -1026,10 +1058,145 @@ const registerUsersToEventFromFile = async (req, res) => {
 
 
 
+// const getEventReport = async (req, res) => {
+//   try {
+//     const { eventId } = req.params;
+//     await connectDB();
+//     if (!mongoose.Types.ObjectId.isValid(eventId)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid event ID",
+//       });
+//     }
+
+//     /* 🔹 Fetch attendees with user & profile */
+
+//     const attendees = await EventAttendee.find({ event: eventId })
+//       .select("status user rejectedReason checkInTime")
+//       .populate({
+//         path: "user",
+//         select: "email contact area",
+//         populate: [
+//           // 🔹 populate user's profile
+//           {
+//             path: "profile",
+//             model: "UserProfile",
+//             select:
+//               "name referral bloodGroup address workAddress weight gender dob lastDonationDate",
+//             populate: {
+//               // referral.referredUser = AuthUser ID
+//               path: "referral.referredUser",
+//               model: "AuthUser",
+//               select: "email contact",
+//               populate: {
+//                 // 🔑 get name from UserProfile
+//                 path: "profile",
+//                 model: "UserProfile",
+//                 select: "name",
+//               },
+//             },
+//           },
+
+//           // 🔹 populate area
+//           {
+//             path: "area",
+//             model: "Area",
+//             select: "name pincode",
+//           },
+//         ],
+//       });
+
+
+
+//     if (!attendees.length) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "No donor data found",
+//       });
+//     }
+//     //   console.log(attendees[367]);
+
+//     //   console.log(attendees[367].user.profile.referral.type);
+
+//     // console.log(attendees[367].user.profile.referral.referredUser.contact);
+
+//     // console.log(attendees[367].user.profile.referral.referredUser.profile.name);
+
+
+
+//     /* 🔹 Create Excel */
+//     const workbook = new ExcelJS.Workbook();
+//     const sheet = workbook.addWorksheet("Donor Report");
+
+//     sheet.columns = [
+//       { header: "Donor Name", key: "name", width: 22 },
+//       { header: "Contact", key: "contact", width: 16 },
+//       { header: "Blood Group", key: "bloodGroup", width: 14 },
+//       { header: "Address", key: "address", width: 30 },
+//       { header: "Work Address", key: "workAddress", width: 30 },
+//       { header: "Donation Status", key: "status", width: 16 },
+//       { header: "Rejection Reason", key: "rejectionReason", width: 24 },
+//       { header: "Referred By", key: "referredBy", width: 22 },
+//       { header: "Referrer Contact", key: "referrerContact", width: 18 },
+//     ];
+
+//     /* 🔹 Fill Rows */
+//     attendees.forEach((row) => {
+//       const profile = row.user.profile || {};
+//       const ref = profile.referral || {};
+
+//       sheet.addRow({
+//         name: profile?.name || "-",
+//         contact: row.user?.contact || row.user?.email || "-",
+//         bloodGroup: profile?.bloodGroup || "-",
+//         address: profile?.address || "-",
+//         workAddress: profile?.workAddess || "-",
+//         status: row.status || "PENDING",
+//         rejectionReason:
+//           row.status === "REJECTED" ? row.rejectedReason || "-" : "-",
+
+//         // 👇 KEY FIX HERE
+//         referredBy: ref?.referredUser
+//           ? ref.referredUser.profile.name
+//           : ref?.type || "-",
+
+//         referrerContact: ref?.referredUser?.contact || "-",
+//       });
+
+//     });
+
+//     /* 🔹 Styling */
+//     sheet.getRow(1).font = { bold: true };
+
+//     /* 🔹 Response Headers */
+//     res.setHeader(
+//       "Content-Type",
+//       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+//     );
+//     res.setHeader(
+//       "Content-Disposition",
+//       `attachment; filename=donor-report-${Date.now()}.xlsx`
+//     );
+
+//     await workbook.xlsx.write(res);
+//     res.end();
+//   } catch (error) {
+//     console.error("Excel Export Error:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to export donor report",
+//     });
+//   }
+// };
+
+
+
+
 const getEventReport = async (req, res) => {
   try {
     const { eventId } = req.params;
     await connectDB();
+
     if (!mongoose.Types.ObjectId.isValid(eventId)) {
       return res.status(400).json({
         success: false,
@@ -1037,29 +1204,39 @@ const getEventReport = async (req, res) => {
       });
     }
 
-    /* 🔹 Fetch attendees with user & profile */
+    /* 🔹 Fetch attendees with user, profile, referral & area */
     const attendees = await EventAttendee.find({ event: eventId })
+      .select("status user rejectedReason checkInTime")
       .populate({
         path: "user",
-        select: "email contact",
-        populate: {
-          path: "profile",
-          model: "UserProfile",
-          populate: [
-            {
-              // populate referred user's profile
+        select: "email contact area",
+        populate: [
+          {
+            path: "profile",
+            model: "UserProfile",
+            select:
+              "name referral bloodGroup address workAddress weight gender dob lastDonationDate",
+            populate: {
+              // referral.referredUser = AuthUser
               path: "referral.referredUser",
-              model: "UserProfile",
+              model: "AuthUser",
+              select: "email contact",
               populate: {
-                // populate referred user's auth user to get contact
-                path: "authUser",
-                model: "AuthUser",
-                select: "contact email",
+                // get referred user's name
+                path: "profile",
+                model: "UserProfile",
+                select: "name",
               },
             },
-          ],
-        },
-      });
+          },
+          {
+            path: "area",
+            model: "Area",
+            select: "name pincode",
+          },
+        ],
+      })
+      .lean();
 
     if (!attendees.length) {
       return res.status(404).json({
@@ -1068,6 +1245,35 @@ const getEventReport = async (req, res) => {
       });
     }
 
+    /* 🔹 STATUS ORDER */
+    const statusOrder = {
+      DONATED: 1,
+      REJECTED: 2,
+      CANCELLED: 3,
+      PENDING: 4,
+    };
+
+    /* 🔹 SORT: status → referral name */
+    attendees.sort((a, b) => {
+      const statusA = statusOrder[a.status] || 99;
+      const statusB = statusOrder[b.status] || 99;
+
+      if (statusA !== statusB) {
+        return statusA - statusB;
+      }
+
+      const refA =
+        a?.user?.profile?.referral?.referredUser?.profile?.name ||
+        a?.user?.profile?.referral?.type ||
+        "";
+
+      const refB =
+        b?.user?.profile?.referral?.referredUser?.profile?.name ||
+        b?.user?.profile?.referral?.type ||
+        "";
+
+      return refA.localeCompare(refB);
+    });
 
     /* 🔹 Create Excel */
     const workbook = new ExcelJS.Workbook();
@@ -1077,8 +1283,13 @@ const getEventReport = async (req, res) => {
       { header: "Donor Name", key: "name", width: 22 },
       { header: "Contact", key: "contact", width: 16 },
       { header: "Blood Group", key: "bloodGroup", width: 14 },
+      { header: "DOB", key: "dob", width: 14 },
+      { header: "Weight (kg)", key: "weight", width: 12 },
       { header: "Address", key: "address", width: 30 },
       { header: "Work Address", key: "workAddress", width: 30 },
+      { header: "Area Name", key: "areaName", width: 20 },
+      { header: "Pincode", key: "pincode", width: 10 },
+      { header: "Last Donation Date", key: "lastDonationDate", width: 18 },
       { header: "Donation Status", key: "status", width: 16 },
       { header: "Rejection Reason", key: "rejectionReason", width: 24 },
       { header: "Referred By", key: "referredBy", width: 22 },
@@ -1089,26 +1300,31 @@ const getEventReport = async (req, res) => {
     attendees.forEach((row) => {
       const profile = row.user.profile || {};
       const ref = profile.referral || {};
-
+      const area = row.user.area || {};
 
       sheet.addRow({
         name: profile?.name || "-",
         contact: row.user?.contact || row.user?.email || "-",
         bloodGroup: profile?.bloodGroup || "-",
+        dob: profile?.dob ? profile.dob.toISOString().split("T")[0] : "-",
+        weight: profile?.weight || "-",
         address: profile?.address || "-",
-        workAddress: profile?.workAddess || "-",
+        workAddress: profile?.workAddress || "-",
+        areaName: area?.name || "-",
+        pincode: area?.pincode || "-",
+        lastDonationDate: profile?.lastDonationDate
+          ? profile.lastDonationDate.toISOString().split("T")[0]
+          : "-",
         status: row.status || "PENDING",
         rejectionReason:
           row.status === "REJECTED" ? row.rejectedReason || "-" : "-",
 
-        // 👇 KEY FIX HERE
-        referredBy: ref?.referredUser?.name
-          ? ref.referredUser.name
+        referredBy: ref?.referredUser
+          ? ref.referredUser.profile?.name
           : ref?.type || "-",
 
-        referrerContact: ref?.referredUser?.authUser?.contact || "-",
+        referrerContact: ref?.referredUser?.contact || "-",
       });
-
     });
 
     /* 🔹 Styling */
@@ -1134,6 +1350,9 @@ const getEventReport = async (req, res) => {
     });
   }
 };
+
+
+
 
 const updateEvent = async (req, res) => {
   try {
